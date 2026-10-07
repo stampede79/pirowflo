@@ -247,6 +247,7 @@ class FTMservice(Service):
         self.add_characteristic(FitnessMachineFeature(bus,0,self))
         self.add_characteristic(RowerData(bus, 1, self))
         self.add_characteristic(FitnessMachineControlPoint(bus, 2, self))
+        self.add_characteristic(FitnessMachineStatus(bus, 3, self))
 
 
 class FitnessMachineFeature(Characteristic):
@@ -295,19 +296,41 @@ class RowerData(Characteristic):
 
     def Waterrower_cb(self):
         Waterrower_byte_values = Convert_Waterrower_raw_to_byte()
-        if self.last_values != Waterrower_byte_values:
-            self.last_values = Waterrower_byte_values 
-            value = [dbus.Byte(0x2C), dbus.Byte(0x0B),
-                dbus.Byte(Waterrower_byte_values[0]), dbus.Byte(Waterrower_byte_values[1]), dbus.Byte(Waterrower_byte_values[2]),
-                dbus.Byte(Waterrower_byte_values[3]), dbus.Byte(Waterrower_byte_values[4]), dbus.Byte(Waterrower_byte_values[5]),
-                dbus.Byte(Waterrower_byte_values[6]), dbus.Byte(Waterrower_byte_values[7]),
-                dbus.Byte(Waterrower_byte_values[8]), dbus.Byte(Waterrower_byte_values[9]),
-                dbus.Byte(Waterrower_byte_values[10]), dbus.Byte(Waterrower_byte_values[11]),dbus.Byte(Waterrower_byte_values[12]),dbus.Byte(Waterrower_byte_values[13]),dbus.Byte(Waterrower_byte_values[14]),
-                dbus.Byte(Waterrower_byte_values[15]),
-                dbus.Byte(Waterrower_byte_values[16]), dbus.Byte(Waterrower_byte_values[17]),
-                ]
-            self.PropertiesChanged(GATT_CHRC_IFACE, { 'Value': value }, [])
+
+        self.last_values = Waterrower_byte_values
+
+        value = [
+            dbus.Byte(0x2C), dbus.Byte(0x0B),
+            dbus.Byte(Waterrower_byte_values[0]),
+            dbus.Byte(Waterrower_byte_values[1]),
+            dbus.Byte(Waterrower_byte_values[2]),
+            dbus.Byte(Waterrower_byte_values[3]),
+            dbus.Byte(Waterrower_byte_values[4]),
+            dbus.Byte(Waterrower_byte_values[5]),
+            dbus.Byte(Waterrower_byte_values[6]),
+            dbus.Byte(Waterrower_byte_values[7]),
+            dbus.Byte(Waterrower_byte_values[8]),
+            dbus.Byte(Waterrower_byte_values[9]),
+            dbus.Byte(Waterrower_byte_values[10]),
+            dbus.Byte(Waterrower_byte_values[11]),
+            dbus.Byte(Waterrower_byte_values[12]),
+            dbus.Byte(Waterrower_byte_values[13]),
+            dbus.Byte(Waterrower_byte_values[14]),
+            dbus.Byte(Waterrower_byte_values[15]),
+            dbus.Byte(Waterrower_byte_values[16]),
+            dbus.Byte(Waterrower_byte_values[17]),
+        ]
+
+        print(">>> SENDING 2AD1:", [int(x) for x in value], flush=True)
+
+        self.PropertiesChanged(
+            GATT_CHRC_IFACE,
+            {'Value': value},
+            []
+        )
+
         return self.notifying
+
 
     def _update_Waterrower_cb_value(self):
         print('Update Waterrower Rower Data')
@@ -315,7 +338,7 @@ class RowerData(Characteristic):
         if not self.notifying:
             return
 
-        GLib.timeout_add(200, self.Waterrower_cb)
+        GLib.timeout_add(1000, self.Waterrower_cb)
 
     def StartNotify(self):
         if self.notifying:
@@ -338,6 +361,33 @@ class RowerData(Characteristic):
 # 20 byte is max data send
 # example : 0x 2C-0B-00-00-00-00-FF-FF-00-00-00-00-00-00-00-00-00-00-00-00
 # first 2 bytes: are for rowing machine details: 0B
+
+class FitnessMachineStatus(Characteristic):
+    FITNESS_MACHINE_STATUS_UUID = '2ada'
+
+    def __init__(self, bus, index, service):
+        Characteristic.__init__(
+            self, bus, index,
+            self.FITNESS_MACHINE_STATUS_UUID,
+            ['notify'],
+            service)
+        self.notifying = False
+
+    def StartNotify(self):
+        if self.notifying:
+            print('Fitness Machine Status already notifying')
+            return
+
+        print('Start Fitness Machine Status Notify')
+        self.notifying = True
+
+    def StopNotify(self):
+        if not self.notifying:
+            print('Fitness Machine Status not notifying')
+            return
+
+        print('Stop Fitness Machine Status Notify')
+        self.notifying = False
 
 class FitnessMachineControlPoint(Characteristic):
     FITNESS_MACHINE_CONTROL_POINT_UUID = '2ad9'
@@ -488,7 +538,7 @@ def main(out_q,ble_in_q): #out_q
     # get the system bus
     bus = dbus.SystemBus()
     # get the ble controller
-    adapter = find_adapter(bus)
+    adapter = "/org/bluez/hci1"
 
     if not adapter:
         logger.critical("GattManager1 interface not found")

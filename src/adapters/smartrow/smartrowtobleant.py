@@ -77,6 +77,32 @@ class DataLogger():
             self.WRValues.update({'elapsedtime': 0})
 
     def on_row_event(self, event):
+        # NEU: fehlerhafte SmartRow-Frames abfangen
+        if not event or len(event) != 16:
+            logger.warning(
+                "Ignoring malformed SmartRow event: %r (length=%d)",
+                event,
+                len(event) if event else 0
+            )
+            return
+
+        if event[0] not in "abcdef":
+            logger.warning(
+                "Ignoring unknown SmartRow event: %r",
+                event
+            )
+            return
+
+        normalized = event.replace(" ", "0")
+
+        if not normalized[1:6].isdigit():
+            logger.warning(
+                "Ignoring malformed SmartRow event: %r (invalid distance %r)",
+                event,
+                normalized[1:6]
+            )
+            return 
+
         if event[0] == self.ENERGIE_KCAL_MESSAGE:
             event = event.replace(" ", "0")
             self.WRValues.update({'total_distance_m': int((event[1:6]))})
