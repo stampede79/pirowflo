@@ -51,6 +51,8 @@ GATT_MANAGER_IFACE = "org.bluez.GattManager1"
 
 logger = logging.getLogger(__name__)
 
+FTMS_ADAPTER_MAC = "00:1A:7D:DA:71:15"
+
 mainloop = None
 
 class InvalidArgsException(dbus.exceptions.DBusException):
@@ -247,6 +249,7 @@ class FTMservice(Service):
         self.add_characteristic(FitnessMachineFeature(bus,0,self))
         self.add_characteristic(RowerData(bus, 1, self))
         self.add_characteristic(FitnessMachineControlPoint(bus, 2, self))
+        self.add_characteristic(FitnessMachineStatus(bus, 3, self))
 
 
 class FitnessMachineFeature(Characteristic):
@@ -262,8 +265,8 @@ class FitnessMachineFeature(Characteristic):
         self.notifying = False
         self.value = [dbus.Byte(0),dbus.Byte(0),dbus.Byte(0),dbus.Byte(0),dbus.Byte(0),dbus.Byte(0),dbus.Byte(0),dbus.Byte(0)]  # ble com module waterrower software revision
 
-        self.value[0] = 0x26
-        self.value[1] = 0x56
+        self.value[0] = 0xff
+        self.value[1] = 0xff
         self.value[2] = 0x00
         self.value[3] = 0x00
         self.value[4] = 0x00
@@ -295,18 +298,40 @@ class RowerData(Characteristic):
 
     def Waterrower_cb(self):
         Waterrower_byte_values = Convert_Waterrower_raw_to_byte()
-        if self.last_values != Waterrower_byte_values:
-            self.last_values = Waterrower_byte_values 
-            value = [dbus.Byte(0x2C), dbus.Byte(0x0B),
-                dbus.Byte(Waterrower_byte_values[0]), dbus.Byte(Waterrower_byte_values[1]), dbus.Byte(Waterrower_byte_values[2]),
-                dbus.Byte(Waterrower_byte_values[3]), dbus.Byte(Waterrower_byte_values[4]), dbus.Byte(Waterrower_byte_values[5]),
-                dbus.Byte(Waterrower_byte_values[6]), dbus.Byte(Waterrower_byte_values[7]),
-                dbus.Byte(Waterrower_byte_values[8]), dbus.Byte(Waterrower_byte_values[9]),
-                dbus.Byte(Waterrower_byte_values[10]), dbus.Byte(Waterrower_byte_values[11]),dbus.Byte(Waterrower_byte_values[12]),dbus.Byte(Waterrower_byte_values[13]),dbus.Byte(Waterrower_byte_values[14]),
-                dbus.Byte(Waterrower_byte_values[15]),
-                dbus.Byte(Waterrower_byte_values[16]), dbus.Byte(Waterrower_byte_values[17]),
-                ]
-            self.PropertiesChanged(GATT_CHRC_IFACE, { 'Value': value }, [])
+
+        value = [
+            dbus.Byte(0x2C), dbus.Byte(0x0B),
+            dbus.Byte(Waterrower_byte_values[0]),
+            dbus.Byte(Waterrower_byte_values[1]),
+            dbus.Byte(Waterrower_byte_values[2]),
+            dbus.Byte(Waterrower_byte_values[3]),
+            dbus.Byte(Waterrower_byte_values[4]),
+            dbus.Byte(Waterrower_byte_values[5]),
+            dbus.Byte(Waterrower_byte_values[6]),
+            dbus.Byte(Waterrower_byte_values[7]),
+            dbus.Byte(Waterrower_byte_values[8]),
+            dbus.Byte(Waterrower_byte_values[9]),
+            dbus.Byte(Waterrower_byte_values[10]),
+            dbus.Byte(Waterrower_byte_values[11]),
+            dbus.Byte(Waterrower_byte_values[12]),
+            dbus.Byte(Waterrower_byte_values[13]),
+            dbus.Byte(Waterrower_byte_values[14]),
+            dbus.Byte(Waterrower_byte_values[15]),
+            dbus.Byte(Waterrower_byte_values[16]),
+            dbus.Byte(Waterrower_byte_values[17]),
+        ]
+
+        logger.debug(
+            "2AD1 sending: %s",
+            [int(x) for x in value]
+        )
+
+        self.PropertiesChanged(
+            GATT_CHRC_IFACE,
+            {'Value': value},
+            []
+        )
+
         return self.notifying
 
     def _update_Waterrower_cb_value(self):
@@ -315,24 +340,28 @@ class RowerData(Characteristic):
         if not self.notifying:
             return
 
-        GLib.timeout_add(200, self.Waterrower_cb)
+        GLib.timeout_add(1000, self.Waterrower_cb)
 
     def StartNotify(self):
+        logger.warning("2AD1 StartNotify called, current notifying=%s", self.notifying)
+
         if self.notifying:
-            print('Already notifying, nothing to do')
+            logger.warning("2AD1 already notifying")
             return
 
         self.notifying = True
+        logger.warning("2AD1 notifications ENABLED")
         self._update_Waterrower_cb_value()
 
     def StopNotify(self):
+        logger.warning("2AD1 StopNotify called, current notifying=%s", self.notifying)
+
         if not self.notifying:
-            print('Not notifying, nothing to do')
+            logger.warning("2AD1 already stopped")
             return
 
         self.notifying = False
-        self._update_Waterrower_cb_value()
-
+        logger.warning("2AD1 notifications DISABLED")
 
 ###### todo: function needed to get all the date from waterrower
 # 20 byte is max data send
@@ -372,6 +401,34 @@ class FitnessMachineControlPoint(Characteristic):
         elif byte == 1:
             print('Reset')
             self.fmcp_cb(byte)
+
+class FitnessMachineStatus(Characteristic):
+    FITNESS_MACHINE_STATUS_UUID = '2ada'
+
+    def __init__(self, bus, index, service):
+        Characteristic.__init__(
+            self,
+            bus,
+            index,
+            self.FITNESS_MACHINE_STATUS_UUID,
+            ['notify'],
+            service
+        )
+        self.notifying = False
+
+    def StartNotify(self):
+        if self.notifying:
+            return
+
+        self.notifying = True
+        print("Fitness Machine Status notifications enabled")
+
+    def StopNotify(self):
+        if not self.notifying:
+            return
+
+        self.notifying = False
+        print("Fitness Machine Status notifications disabled")
 
 class HeartRate(Service):
     HEART_RATE = '180D'
@@ -488,11 +545,20 @@ def main(out_q,ble_in_q): #out_q
     # get the system bus
     bus = dbus.SystemBus()
     # get the ble controller
-    adapter = find_adapter(bus)
+    adapter = find_adapter(
+        bus,
+        adapter_address=FTMS_ADAPTER_MAC
+    )
 
     if not adapter:
         logger.critical("GattManager1 interface not found")
         return
+
+    logger.info(
+        "using Bluetooth adapter %s (%s) for FTMS",
+        adapter,
+        FTMS_ADAPTER_MAC
+    )
 
     adapter_obj = bus.get_object(BLUEZ_SERVICE_NAME, adapter)
 

@@ -77,6 +77,47 @@ class DataLogger():
             self.WRValues.update({'elapsedtime': 0})
 
     def on_row_event(self, event):
+        if not event:
+            logger.warning("Ignoring empty SmartRow event")
+            return
+
+        # Minimum expected length for each SmartRow message type.
+        min_lengths = {
+            self.ENERGIE_KCAL_MESSAGE: 10,
+            self.WORK_STROKE_LENGTH_MESSAGE: 14,
+            self.POWER_MESSAGE: 14,
+            self.STROKE_RATE_STROKE_COUNT_MESSAGE: 13,
+            self.PACE_MESSAGE: 12,
+            self.FORCE_MESSAGE: 12,
+        }
+
+        message_type = event[0]
+
+        ignored_message_types = {
+            self.FIRST_PART_FORCE_CURVE_MESSAGE,
+            self.SECOND_PART_FORCE_CURVE_MESSAGE,
+            self.THIRD_PARD_FORCE_CURVE_MESSAGE,
+        }
+
+        if message_type in ignored_message_types:
+            return
+
+        if message_type not in min_lengths:
+            logger.warning(
+                "Ignoring unknown SmartRow event: %r",
+                event
+            )
+            return
+
+        if len(event) < min_lengths[message_type]:
+            logger.warning(
+                "Ignoring malformed SmartRow event: %r (length=%d, expected>=%d)",
+                event,
+                len(event),
+                min_lengths[message_type]
+            )
+            return
+
         if event[0] == self.ENERGIE_KCAL_MESSAGE:
             event = event.replace(" ", "0")
             self.WRValues.update({'total_distance_m': int((event[1:6]))})
@@ -176,7 +217,16 @@ def main(in_q, ble_out_q,ant_out_q):
     # this starts discovery, calls manager.run() and returns manager.smartrowmac
     #
     macaddresssmartrower = smartrowreader.connecttosmartrow()
-    manager = gatt.DeviceManager(adapter_name='hci0')
+    adapter_name = smartrowreader.get_adapter_name_by_mac(
+        smartrowreader.SMARTROW_ADAPTER_MAC
+    )
+
+    logger.info(
+        "using %s for SmartRow connection",
+        adapter_name
+    )
+
+    manager = gatt.DeviceManager(adapter_name=adapter_name)
     smartrow = smartrowreader.SmartRow(mac_address=macaddresssmartrower, manager=manager)
     SRtoBLEANT = DataLogger(smartrow)
 

@@ -36,19 +36,36 @@ class InvalidValueLengthException(dbus.exceptions.DBusException):
 class FailedException(dbus.exceptions.DBusException):
     _dbus_error_name = "org.bluez.Error.Failed"
 
-def find_adapter(bus):
+def find_adapter(bus, adapter_name=None, adapter_address=None):
     """
-    Returns the first object that the bluez service has that has a GattManager1 interface
+    Returns a BlueZ adapter that provides GattManager1.
+
+    If adapter_name is given, only that adapter is returned.
+    If adapter_address is given, the adapter is selected by Bluetooth MAC.
     """
-    remote_om = dbus.Interface(bus.get_object(BLUEZ_SERVICE_NAME, "/"), DBUS_OM_IFACE)
+    remote_om = dbus.Interface(
+        bus.get_object(BLUEZ_SERVICE_NAME, "/"),
+        DBUS_OM_IFACE
+    )
     objects = remote_om.GetManagedObjects()
 
     for o, props in objects.items():
-        if GATT_MANAGER_IFACE in props.keys():
-            return o
+        if GATT_MANAGER_IFACE not in props:
+            continue
+
+        if adapter_name is not None and not o.endswith("/" + adapter_name):
+            continue
+
+        if adapter_address is not None:
+            adapter_props = props.get("org.bluez.Adapter1", {})
+            address = str(adapter_props.get("Address", ""))
+
+            if address.lower() != adapter_address.lower():
+                continue
+
+        return o
 
     return None
-
 
 class Application(dbus.service.Object):
     """

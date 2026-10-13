@@ -1,10 +1,38 @@
 import gatt
 import logging
 import os
+import dbus
 import threading
 from time import time, sleep
 
 logger = logging.getLogger(__name__)
+
+SMARTROW_ADAPTER_MAC = "B8:27:EB:1D:E3:3E"
+
+def get_adapter_name_by_mac(mac_address):
+    bus = dbus.SystemBus()
+
+    manager = dbus.Interface(
+        bus.get_object("org.bluez", "/"),
+        "org.freedesktop.DBus.ObjectManager"
+    )
+
+    objects = manager.GetManagedObjects()
+
+    for path, interfaces in objects.items():
+        adapter = interfaces.get("org.bluez.Adapter1")
+
+        if not adapter:
+            continue
+
+        address = str(adapter.get("Address", ""))
+
+        if address.lower() == mac_address.lower():
+            return path.rsplit("/", 1)[-1]
+
+    raise RuntimeError(
+        "Bluetooth adapter with MAC {} not found".format(mac_address)
+    )
 
 #This SDK requires you to create subclasses of gatt.DeviceManager and gatt.Device. The other two classes gatt.Service and gatt.Characteristic are not supposed to be subclassed.
 
@@ -22,6 +50,7 @@ class SmartRow(gatt.Device):
         self._callbacks = set()
         self.lock = threading.Lock()
         self.is_connected = False
+        self._rx_buffer = ""
 
     def ready(self):
       with self.lock: #"Lock Acquired"
@@ -75,17 +104,24 @@ class SmartRow(gatt.Device):
         
     def characteristic_value_updated(self, characteristic, value):
         super().characteristic_value_updated(characteristic, value)
+
         try:
             decoded = value.decode('latin-1')
         except Exception as e:
             logger.warning("decode error: %s raw: %s", e, value.hex())
             return
-        # SmartRow packs multiple \r-terminated messages into one notification
-        for part in decoded.split('\r'):
+
+        # BLE notifications do not necessarily align with SmartRow message
+        # boundaries. Keep incomplete data until a complete \r-terminated
+        # SmartRow message has been received.
+        self._rx_buffer += decoded
+
+        while '\r' in self._rx_buffer:
+            part, self._rx_buffer = self._rx_buffer.split('\r', 1)
             part = part.strip('\n')
+
             if part:
                 self.notify_callbacks(part)
-
 
     def characteristic_write_value(self, value):
         self.writing = value
@@ -185,15 +221,22 @@ def _load_smartrow_mac():
 
 def connecttosmartrow():
     logger.info("starting discovery")
+    
+    adapter_name = get_adapter_name_by_mac(SMARTROW_ADAPTER_MAC)
+    logger.info(
+        "using %s (%s) for SmartRow",
+        adapter_name,
+        SMARTROW_ADAPTER_MAC
+    )
 
     # --- Fast path: SmartRow already in BlueZ device cache ---
     # Check by alias ("SmartRow") or by previously cached MAC address.
     # Only return early if BlueZ actually has the device object – if it
     # doesn't, gatt.Device.connect() will fail with "Device does not exist"
     # (BlueZ loses its device cache when the bluetooth service restarts).
-    _probe = SmartRowManager(adapter_name='hci0')
+    _probe = SmartRowManager(adapter_name=adapter_name)
     if not _probe.is_adapter_powered:
-        logger.info("hci0 not powered – powering on")
+        logger.info("%s not powered – powering on", adapter_name)
         _probe.is_adapter_powered = True
         sleep(2)
     cached_mac = _load_smartrow_mac()
@@ -219,9 +262,9 @@ def connecttosmartrow():
     # bluetooth service is restarted.  StopDiscovery + a brief pause is enough
     # to reset BlueZ's discovery state cleanly.
     try:
-        _stop_probe = SmartRowManager(adapter_name='hci0')
+        _stop_probe = SmartRowManager(adapter_name=adapter_name)
         _stop_probe.stop_discovery()
-        logger.info("stopped stale discovery on hci0")
+        logger.info("stopped stale discovery on %s", adapter_name)
         del _stop_probe
     except Exception:
         pass
@@ -229,8 +272,8 @@ def connecttosmartrow():
 
     # Fresh manager – created after the stale session is gone so all D-Bus
     # proxy objects reflect the current adapter state.
-    manager = SmartRowManager(adapter_name='hci0')
-    logger.info("starting BLE scan on hci0 – pull the SmartRow handle to wake it up")
+    manager = SmartRowManager(adapter_name=adapter_name)
+    logger.info("starting BLE scan on %s – pull the SmartRow handle to wake it up", adapter_name)
     manager.start_discovery()
     manager.run()
     while not manager.ready():
