@@ -343,25 +343,25 @@ class RowerData(Characteristic):
         GLib.timeout_add(1000, self.Waterrower_cb)
 
     def StartNotify(self):
-        logger.warning("2AD1 StartNotify called, current notifying=%s", self.notifying)
+        logger.debug("2AD1 StartNotify called, current notifying=%s", self.notifying)
 
         if self.notifying:
             logger.warning("2AD1 already notifying")
             return
 
         self.notifying = True
-        logger.warning("2AD1 notifications ENABLED")
+        logger.debug("2AD1 notifications ENABLED")
         self._update_Waterrower_cb_value()
 
     def StopNotify(self):
-        logger.warning("2AD1 StopNotify called, current notifying=%s", self.notifying)
+        logger.debug("2AD1 StopNotify called, current notifying=%s", self.notifying)
 
         if not self.notifying:
             logger.warning("2AD1 already stopped")
             return
 
         self.notifying = False
-        logger.warning("2AD1 notifications DISABLED")
+        logger.debug("2AD1 notifications DISABLED")
 
 ###### todo: function needed to get all the date from waterrower
 # 20 byte is max data send

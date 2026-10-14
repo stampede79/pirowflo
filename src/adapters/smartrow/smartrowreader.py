@@ -60,10 +60,24 @@ class SmartRow(gatt.Device):
         super().connect_succeeded()
         logger.info("Connected to [{}]".format(self.mac_address))
 
-
     def connect_failed(self, error):
         super().connect_failed(error)
-        logger.info("Connection failed [{}]: {} — retrying in 2s".format(self.mac_address, error))
+
+        error_text = str(error)
+
+        if "Device does not exist" in error_text:
+            logger.error(
+                "SmartRow device object disappeared from BlueZ [%s] — "
+                "exiting so Supervisor can restart discovery",
+                self.mac_address
+            )
+            os._exit(1)
+
+        logger.info(
+            "Connection failed [%s]: %s — retrying in 2s",
+            self.mac_address,
+            error
+        )
         sleep(2)
         self.connect()
 
@@ -280,8 +294,17 @@ def connecttosmartrow():
         sleep(0.2)
     logger.info("found SmartRow macaddress: %s", manager.smartrowmac)
     _save_smartrow_mac(manager.smartrowmac)
-    return manager.smartrowmac
 
+    smartrow_mac = manager.smartrowmac
+
+    # Give BlueZ time to expose the discovered device to a fresh
+    # DeviceManager before the connection manager is created.
+    logger.info(
+        "waiting for SmartRow %s to become available in BlueZ",
+        smartrow_mac
+    )
+    sleep(1)
+    return smartrow_mac
 
 if __name__ == '__main__':
 
