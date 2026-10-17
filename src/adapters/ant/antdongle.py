@@ -202,7 +202,6 @@ class clsAntDongle():
                             self.devAntDongle.write(0x01, reset_string)
                             time.sleep(0.500)                           # after reset, 500ms before next action
 
-
                             reply = self.Read(False)
 
                             self.Message = "No expected reply from dongle"
@@ -221,8 +220,7 @@ class clsAntDongle():
                             if found_available_ant_stick: break
 
                     except usb.core.USBError as e:                  # cannot write to ANT dongle
-                        self.Message = "GetDongle - ANT dongle in use"
-
+                        self.Message = "GetDongle - USBError: " + repr(e)
                     except Exception as e:
                         self.Message = "GetDongle: " + str(e)
 

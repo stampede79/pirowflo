@@ -51,7 +51,7 @@ GATT_MANAGER_IFACE = "org.bluez.GattManager1"
 
 logger = logging.getLogger(__name__)
 
-FTMS_ADAPTER_MAC = "00:1A:7D:DA:71:15"
+FTMS_ADAPTER_MAC = "B8:27:EB:1D:E3:3E"
 
 mainloop = None
 
@@ -95,7 +95,14 @@ def Convert_Waterrower_raw_to_byte():
     #print("Ble Values: {0}".format(WaterrowerValuesRaw))
     #todo refactor this part with the correct struct.pack e.g. 2 bytes use "H" instand of bitshifiting ?
     #print(WaterrowerValuesRaw)
-    WRBytearray.append(struct.pack("B", (WaterrowerValuesRaw['stroke_rate'] & 0xff)))
+    logger.debug(
+        "FTMS input types: %s",
+        {
+            key: (value, type(value).__name__)
+            for key, value in WaterrowerValuesRaw.items()
+        }
+    )
+    WRBytearray.append(struct.pack("B", (int(round(WaterrowerValuesRaw['stroke_rate'])) & 0xff)))
     WRBytearray.append(struct.pack("B", (WaterrowerValuesRaw['total_strokes'] & 0xff)))
     WRBytearray.append(struct.pack("B", (WaterrowerValuesRaw['total_strokes'] & 0xff00) >> 8))
     WRBytearray.append(struct.pack("B", (WaterrowerValuesRaw['total_distance_m'] & 0xff)))
@@ -331,7 +338,25 @@ class RowerData(Characteristic):
             {'Value': value},
             []
         )
+        self.iter += 1
 
+        if self.iter >= 10:
+            distance_internal = WaterrowerValuesRaw.get('total_distance_m', 0)
+
+            # Decode the 24-bit little-endian distance exactly as sent via FTMS.
+            distance_ftms = (
+                int(Waterrower_byte_values[3][0])
+                | (int(Waterrower_byte_values[4][0]) << 8)
+                | (int(Waterrower_byte_values[5][0]) << 16)
+            )
+
+            logger.info(
+                "FTMS active - internal distance=%sm, sent distance=%sm",
+                distance_internal,
+                distance_ftms,
+            )
+
+            self.iter = 0
         return self.notifying
 
     def _update_Waterrower_cb_value(self):
@@ -343,25 +368,31 @@ class RowerData(Characteristic):
         GLib.timeout_add(1000, self.Waterrower_cb)
 
     def StartNotify(self):
-        logger.debug("2AD1 StartNotify called, current notifying=%s", self.notifying)
+        logger.info(
+        "FTMS Rower Data client subscribed (2AD1), current notifying=%s",
+        self.notifying)
 
         if self.notifying:
             logger.warning("2AD1 already notifying")
             return
 
         self.notifying = True
+        self.iter = 0
         logger.debug("2AD1 notifications ENABLED")
         self._update_Waterrower_cb_value()
 
     def StopNotify(self):
-        logger.debug("2AD1 StopNotify called, current notifying=%s", self.notifying)
+        logger.info(
+            "FTMS Rower Data client unsubscribed (2AD1), current notifying=%s",
+            self.notifying
+        )
 
         if not self.notifying:
             logger.warning("2AD1 already stopped")
             return
 
         self.notifying = False
-        logger.debug("2AD1 notifications DISABLED")
+        logger.info("FTMS Rower Data notifications DISABLED")
 
 ###### todo: function needed to get all the date from waterrower
 # 20 byte is max data send
@@ -498,14 +529,17 @@ class FTMPAdvertisement(Advertisement):
         self.add_local_name("PiRowFlo")
         self.include_tx_power = True
 
+ad_retry_count = 0
+MAX_AD_RETRIES = 5
 
 def register_ad_cb():
-    logger.info("Advertisement registered")
+    global ad_retry_count
 
+    ad_retry_count = 0
+    logger.info("Advertisement registered")
 
 def register_ad_error_cb(error):
     logger.critical("Failed to register advertisement: " + str(error))
-    mainloop.quit()
 
 def sigint_handler(sig, frame):
     if sig == signal.SIGINT:
@@ -532,6 +566,15 @@ def Waterrower_poll():
 
     return True
 
+def shutdown():
+    global mainloop
+
+    try:
+        if mainloop is not None:
+            logger.info("BLE shutdown requested")
+            mainloop.quit()
+    except Exception as e:
+        logger.warning("Could not stop BLE mainloop: %s", e)
 
 def main(out_q,ble_in_q): #out_q
     global mainloop
@@ -560,34 +603,69 @@ def main(out_q,ble_in_q): #out_q
         FTMS_ADAPTER_MAC
     )
 
+    logger.info("BLE init: getting adapter object")
     adapter_obj = bus.get_object(BLUEZ_SERVICE_NAME, adapter)
 
+    logger.info("BLE init: creating adapter properties interface")
     adapter_props = dbus.Interface(adapter_obj, "org.freedesktop.DBus.Properties")
 
     # powered property on the controller to on
-    adapter_props.Set("org.bluez.Adapter1", "Powered", dbus.Boolean(1))
+    powered = adapter_props.Get(
+        "org.bluez.Adapter1",
+        "Powered"
+    )
+
+    if not powered:
+        logger.info("BLE init: adapter is off - powering on")
+        adapter_props.Set(
+            "org.bluez.Adapter1",
+            "Powered",
+            dbus.Boolean(1)
+        )
+        logger.info("BLE init: adapter powered")
+    else:
+        logger.info("BLE init: adapter already powered")
 
     # Get manager objs
+    logger.info("BLE init: creating GATT/advertising manager interfaces")
     service_manager = dbus.Interface(adapter_obj, GATT_MANAGER_IFACE)
     ad_manager = dbus.Interface(adapter_obj, LE_ADVERTISING_MANAGER_IFACE)
 
+    logger.info("BLE init: creating advertisement")
     advertisement = FTMPAdvertisement(bus, 0)
+
+    logger.info("BLE init: getting BlueZ root object")
     obj = bus.get_object(BLUEZ_SERVICE_NAME, "/org/bluez")
 
+    logger.info("BLE init: creating agent")
     agent = Agent(bus, AGENT_PATH)
 
+    logger.info("BLE init: creating GATT application")
     app = Application(bus)
+
+    logger.info("BLE init: adding DeviceInformation service")
     app.add_service(DeviceInformation(bus, 1))
+
+    logger.info("BLE init: adding FTMS service")
     app.add_service(FTMservice(bus, 2))
-    app.add_service(HeartRate(bus,3))
+
+    logger.info("BLE init: adding HeartRate service")
+    app.add_service(HeartRate(bus, 3))
+
+    logger.info("BLE init: services created")
 
     GLib.timeout_add(100, Waterrower_poll)
 
     mainloop = MainLoop()
 
+    logger.info("Creating BlueZ AgentManager interface")
     agent_manager = dbus.Interface(obj, "org.bluez.AgentManager1")
-    agent_manager.RegisterAgent(AGENT_PATH, "NoInputNoOutput") # register the bluetooth agent with no input and output which should avoid asking for pairing 
 
+    logger.info("Registering BlueZ agent %s", AGENT_PATH)
+    agent_manager.RegisterAgent(AGENT_PATH, "NoInputNoOutput") # register the bluetooth agent with no input and output which should avoid asking for pairing 
+    logger.info("BlueZ agent registered")
+
+    logger.info("Registering BLE advertisement...")
     ad_manager.RegisterAdvertisement(
         advertisement.get_path(),
         {},
@@ -606,10 +684,30 @@ def main(out_q,ble_in_q): #out_q
 
     agent_manager.RequestDefaultAgent(AGENT_PATH)
 
-    mainloop.run()
-    # ad_manager.UnregisterAdvertisement(advertisement)
-    # dbus.service.Object.remove_from_connection(advertisement)
+    try:
+        mainloop.run()
+    finally:
+        logger.info("Cleaning up BLE advertisement")
 
+        try:
+            ad_manager.UnregisterAdvertisement(
+                advertisement.get_path()
+            )
+            logger.info("Advertisement unregistered")
+        except Exception as e:
+            logger.warning(
+                "Could not unregister advertisement: %s",
+                e
+            )
+
+        try:
+            advertisement.remove_from_connection()
+            logger.info("Advertisement D-Bus object removed")
+        except Exception as e:
+            logger.warning(
+                "Could not remove advertisement D-Bus object: %s",
+                e
+            )
 #
 # if __name__ == "__main__":
 #     signal.signal(signal.SIGINT, sigint_handler)

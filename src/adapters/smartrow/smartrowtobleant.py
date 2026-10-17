@@ -11,6 +11,7 @@ from . import smartrowreader
 
 logger = logging.getLogger(__name__)
 
+SMARTROW_IDLE_TIMEOUT = 10 * 60
 
 class DataLogger():
 
@@ -34,6 +35,8 @@ class DataLogger():
         self.starttime = None
         self.fullstop = None
         self.SmartRowHalt = None
+        self.last_activity = time.monotonic()
+        self._last_activity_distance = 0
 
         self._reset_state()
 
@@ -191,6 +194,12 @@ class DataLogger():
                     self.fullstop = False
             self.elapsedtime()
 
+        current_distance = self.WRValues.get('total_distance_m', 0)
+
+        if current_distance > self._last_activity_distance:
+            self.last_activity = time.monotonic()
+            self._last_activity_distance = current_distance
+
         logger.debug(self.WRValues)
 
 
@@ -207,16 +216,16 @@ def reset(smartrow):
     sleep(0.002)
     smartrow.characteristic_write_value(struct.pack("<b", 13))
 
-def heartbeat(sr):
-    while True:
-        sr.characteristic_write_value(struct.pack("<b", 36))
-        sleep(1)
+def heartbeat(sr, stop_event):
+    while not stop_event.is_set():
+        try:
+            sr.characteristic_write_value(struct.pack("<b", 36))
+        except Exception as e:
+            logger.debug("SmartRow heartbeat write failed: %s", e)
 
+        stop_event.wait(1)
 
-def main(in_q, ble_out_q,ant_out_q):
-    # this starts discovery, calls manager.run() and returns manager.smartrowmac
-    #
-    macaddresssmartrower = smartrowreader.connecttosmartrow()
+def main(in_q, ble_out_q, ant_out_q):
     adapter_name = smartrowreader.get_adapter_name_by_mac(
         smartrowreader.SMARTROW_ADAPTER_MAC
     )
@@ -226,43 +235,223 @@ def main(in_q, ble_out_q,ant_out_q):
         adapter_name
     )
 
-    manager = gatt.DeviceManager(adapter_name=adapter_name)
-    smartrow = smartrowreader.SmartRow(mac_address=macaddresssmartrower, manager=manager)
-    SRtoBLEANT = DataLogger(smartrow)
-
-    BC = threading.Thread(target=connectSR, args=(manager,smartrow))
-    BC.daemon = True
-    BC.start()
-
-    logger.info("SmartRow Ready and sending data to BLE and ANT Thread")
-    while not smartrow.ready() :
-      sleep(0.2)
-
-    logger.info("starting heart beat")
-    HB = threading.Thread(target=heartbeat, args=([smartrow]))
-    HB.daemon = True
-    HB.start()
-    sleep(3) # this sleep is needed in order give the user time to putt back the handle after pulling it to activate it.
-    # The SmartRow device is very sensitive to touches which then triggers 1 m very easy after a reset which then already starts after a restart.
-    reset(smartrow)
-    sleep(1)
-    SRtoBLEANT.Initial_reset = True # this should help to check if the first reset has been performed
+    # Keep one DataLogger for the lifetime of this PiRowFlo process.
+    # A new SmartRow object is attached after every wake-up so the
+    # current workout values survive a temporary BLE disconnect.
+    SRtoBLEANT = None
+    first_connection = True
 
     while True:
-        if not in_q.empty():
-            ResetRequest_ble = in_q.get()
-            if isinstance(ResetRequest_ble, str) and ResetRequest_ble.startswith("hr "):
-                # ANT+ heart rate data — update WRValues instead of resetting
-                try:
-                    SRtoBLEANT.WRValues.update({'heart_rate': int(ResetRequest_ble.split()[1])})
-                except (ValueError, IndexError):
-                    pass
-            else:
-                reset(smartrow)
+        logger.info(
+            "WAITING_FOR_SMARTROW - waiting for SmartRow to become available"
+        )
+
+        # connecttosmartrow() performs discovery if necessary and blocks
+        # until SmartRow is visible.
+        macaddresssmartrower = smartrowreader.connecttosmartrow()
+
+        # Always use fresh GATT objects for a new connection.
+        manager = gatt.DeviceManager(adapter_name=adapter_name)
+        smartrow = smartrowreader.SmartRow(
+            mac_address=macaddresssmartrower,
+            manager=manager
+        )
+
+        if SRtoBLEANT is None:
+            SRtoBLEANT = DataLogger(smartrow)
         else:
-            pass
-        ble_out_q.append(SRtoBLEANT.WRValues)
-        ant_out_q.append(SRtoBLEANT.WRValues)
-        sleep(0.1)
+            # Preserve workout/session values but receive future SmartRow
+            # events from the newly-created BLE device.
+            SRtoBLEANT._rower_interface = smartrow
+            smartrow.register_callback(SRtoBLEANT.on_row_event)
+
+        BC = threading.Thread(
+            target=connectSR,
+            args=(manager, smartrow)
+        )
+        BC.daemon = True
+        BC.start()
+
+        logger.info(
+            "SmartRow connection attempt started"
+        )
+
+        while not smartrow.ready():
+            with smartrow.lock:
+                failed = smartrow.connection_failed_permanently
+
+            if failed:
+                logger.error(
+                    "SmartRow connection setup failed permanently - "
+                    "ending SmartRow thread for Supervisor recovery"
+                )
+                return
+
+            sleep(0.2)
+
+        logger.info("SmartRow connected and ready")
+        SRtoBLEANT.last_activity = time.monotonic()
+        SRtoBLEANT._last_activity_distance = (
+            SRtoBLEANT.WRValues.get('total_distance_m', 0)
+        )
+        logger.info("starting heart beat")
+
+        heartbeat_stop = threading.Event()
+
+        HB = threading.Thread(
+            target=heartbeat,
+            args=(smartrow, heartbeat_stop)
+        )
+        HB.daemon = True
+        HB.start()
+
+        if first_connection:
+            sleep(3)
+            reset(smartrow)
+            sleep(1)
+            SRtoBLEANT.Initial_reset = True
+            first_connection = False
+        else:
+            logger.info(
+                "SmartRow woke up and reconnected - preserving session state"
+            )
+
+        while True:
+            with smartrow.lock:
+                failed = smartrow.connection_failed_permanently
+                waiting = smartrow.waiting_for_wakeup
+
+            if waiting:
+                logger.info(
+                    "SmartRow entered waiting-for-wakeup state - "
+                    "stopping heartbeat"
+                )
+
+                heartbeat_stop.set()
+                HB.join(timeout=2)
+
+                if HB.is_alive():
+                    logger.warning(
+                        "SmartRow heartbeat did not stop within 2 seconds"
+                    )
+                else:
+                    logger.info("SmartRow heartbeat stopped")
+
+                # The manager's GLib loop should already have stopped via
+                # disconnect_succeeded(), but wait briefly for its thread
+                # before creating fresh GATT objects.
+                BC.join(timeout=2)
+
+                if BC.is_alive():
+                    logger.warning(
+                        "Old SmartRow connection thread is still running"
+                    )
+                else:
+                    logger.info(
+                        "Old SmartRow connection thread stopped"
+                    )
+
+                try:
+                    manager.remove_device(smartrow.mac_address)
+                    logger.info(
+                        "Removed sleeping SmartRow from BlueZ cache [%s]",
+                        smartrow.mac_address
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Could not remove sleeping SmartRow from BlueZ cache [%s]: %s",
+                        smartrow.mac_address,
+                        e
+                    )
+                try:
+                    with open(smartrowreader._FORCE_SCAN_FILE, 'w') as f:
+                        f.write(smartrow.mac_address)
+
+                    logger.info(
+                        "SmartRow wake-up scan requested"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Could not request SmartRow wake-up scan: %s",
+                        e
+                    )
+
+                logger.info(
+                    "WAITING_FOR_SMARTROW - SmartRow may sleep now"
+                )
+
+                # Break only the active-session loop. The outer loop starts
+                # discovery and waits for SmartRow to advertise after wake-up.
+                break
+
+            if failed:
+                heartbeat_stop.set()
+                HB.join(timeout=2)
+
+                logger.error(
+                    "SmartRow connection lost unexpectedly - "
+                    "ending SmartRow thread for Supervisor recovery"
+                )
+                return
+
+            idle_seconds = (
+                time.monotonic() - SRtoBLEANT.last_activity
+            )
+
+            if idle_seconds >= SMARTROW_IDLE_TIMEOUT:
+                logger.info(
+                    "SmartRow inactive for %.0f seconds - "
+                    "disconnecting to allow sleep",
+                    idle_seconds
+                )
+
+                heartbeat_stop.set()
+                HB.join(timeout=2)
+
+                if HB.is_alive():
+                    logger.warning(
+                        "SmartRow heartbeat did not stop before idle disconnect"
+                    )
+                else:
+                    logger.info(
+                        "SmartRow heartbeat stopped for idle disconnect"
+                    )
+
+                try:
+                    smartrow.disconnect()
+                    logger.info(
+                        "SmartRow idle disconnect requested"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Could not disconnect idle SmartRow: %s",
+                        e
+                    )
+
+                sleep(1)
+                continue
+
+            if not in_q.empty():
+                ResetRequest_ble = in_q.get()
+
+                if (
+                    isinstance(ResetRequest_ble, str)
+                    and ResetRequest_ble.startswith("hr ")
+                ):
+                    try:
+                        SRtoBLEANT.WRValues.update({
+                            'heart_rate':
+                                int(ResetRequest_ble.split()[1])
+                        })
+                    except (ValueError, IndexError):
+                        pass
+                else:
+                    reset(smartrow)
+
+            ble_out_q.append(SRtoBLEANT.WRValues)
+            ant_out_q.append(SRtoBLEANT.WRValues)
+
+            sleep(0.1)
+
 if __name__ == '__main__':
     main()

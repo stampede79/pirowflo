@@ -1,10 +1,12 @@
-from os import _exit
+import logging
 from time import sleep
 
 from . import antdongle as ant
 from . import antfe as fe
 
 from collections import deque
+
+logger = logging.getLogger(__name__)
 
 def main(out_q, ant_in_q):
     global out_q_hr
@@ -14,8 +16,8 @@ def main(out_q, ant_in_q):
     Antdongle = ant.clsAntDongle() # define the ANt+ dongle
     print(Antdongle.Message)
     if not Antdongle.OK:
-        print("ANT+ dongle not ready, exiting...")
-        _exit(-1)
+        logger.error("ANT+ dongle not ready, ANT thread exiting")
+        return
     Antdongle.Calibrate()   # reset the dongle and defines it as node
     sleep(0.25)
     Antdongle.Trainer_ChannelConfig() # define the channel needed for fitness equipements

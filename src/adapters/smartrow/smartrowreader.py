@@ -7,7 +7,7 @@ from time import time, sleep
 
 logger = logging.getLogger(__name__)
 
-SMARTROW_ADAPTER_MAC = "B8:27:EB:1D:E3:3E"
+SMARTROW_ADAPTER_MAC = "00:1A:7D:DA:71:15"
 
 def get_adapter_name_by_mac(mac_address):
     bus = dbus.SystemBus()
@@ -51,6 +51,9 @@ class SmartRow(gatt.Device):
         self.lock = threading.Lock()
         self.is_connected = False
         self._rx_buffer = ""
+        self.connect_failures = 0
+        self.connection_failed_permanently = False
+        self.waiting_for_wakeup = False
 
     def ready(self):
       with self.lock: #"Lock Acquired"
@@ -68,22 +71,94 @@ class SmartRow(gatt.Device):
         if "Device does not exist" in error_text:
             logger.error(
                 "SmartRow device object disappeared from BlueZ [%s] — "
-                "exiting so Supervisor can restart discovery",
+                "requesting fresh discovery",
                 self.mac_address
             )
-            os._exit(1)
 
-        logger.info(
-            "Connection failed [%s]: %s — retrying in 2s",
+            with self.lock:
+                self.connection_failed_permanently = True
+
+            try:
+                self.manager.stop()
+            except Exception:
+                pass
+
+            return
+
+        self.connect_failures += 1
+
+        logger.warning(
+            "Connection failed [%s]: %s — attempt %d/3",
             self.mac_address,
-            error
+            error,
+            self.connect_failures
         )
+        if self.connect_failures >= 3:
+            logger.error(
+                "SmartRow connection failed 3 times — removing stale BlueZ device "
+                "and requesting fresh discovery"
+            )
+
+            with self.lock:
+                self.connection_failed_permanently = True
+            try:
+                with open(_FORCE_SCAN_FILE, 'w') as f:
+                    f.write(self.mac_address)
+                logger.info("SmartRow force-scan marker created")
+            except Exception as e:
+                logger.warning("Could not create SmartRow force-scan marker: %s", e)
+
+            try:
+                self.manager.remove_device(self.mac_address)
+                logger.info(
+                    "Removed stale SmartRow device from BlueZ [%s]",
+                    self.mac_address
+                )
+            except Exception as e:
+                logger.warning(
+                    "Could not remove stale SmartRow device from BlueZ [%s]: %s",
+                    self.mac_address,
+                    e
+                )
+
+            try:
+                self.manager.stop()
+            except Exception:
+                pass
+
+            return
+
         sleep(2)
         self.connect()
 
     def disconnect_succeeded(self):
         super().disconnect_succeeded()
-        logger.info("Disconnected [{}]".format(self.mac_address))
+
+        with self.lock:
+            was_connected = self.is_connected
+            self.is_connected = False
+        if was_connected:
+            logger.info(
+                "SmartRow disconnected after successful connection [%s] — "
+                "entering waiting-for-wakeup state",
+                self.mac_address
+            )
+
+            with self.lock:
+                self.waiting_for_wakeup = True
+
+            try:
+                self.manager.stop()
+            except Exception:
+                pass
+
+            return
+
+        logger.info(
+            "SmartRow disconnected during connection setup [%s] — "
+            "waiting for retry",
+            self.mac_address
+        )
 
     def find_service(self, uuid):
         for service in self.services:
@@ -101,6 +176,10 @@ class SmartRow(gatt.Device):
 
     def services_resolved(self):
         super().services_resolved()
+        with self.lock:
+            self.connect_failures = 0
+            self.connection_failed_permanently = False
+            self.waiting_for_wakeup = False
 
         logger.info("Resolved services [{}]".format(self.mac_address))
         for service in self.services:
@@ -210,6 +289,7 @@ class SmartRowManager(gatt.DeviceManager):
 
 
 _MAC_CACHE_FILE = '/tmp/pirowflo_smartrow_mac'
+_FORCE_SCAN_FILE = '/tmp/pirowflo_smartrow_force_scan'
 
 
 def _save_smartrow_mac(mac):
@@ -249,25 +329,48 @@ def connecttosmartrow():
     # doesn't, gatt.Device.connect() will fail with "Device does not exist"
     # (BlueZ loses its device cache when the bluetooth service restarts).
     _probe = SmartRowManager(adapter_name=adapter_name)
+
     if not _probe.is_adapter_powered:
         logger.info("%s not powered – powering on", adapter_name)
         _probe.is_adapter_powered = True
         sleep(2)
+
     cached_mac = _load_smartrow_mac()
-    for device in _probe.devices():
-        try:
-            alias = device.alias()
-        except Exception:
-            alias = ""
-        logger.info("known device: alias=%s mac=%s", alias, device.mac_address)
-        mac_match = cached_mac and device.mac_address.lower() == cached_mac.lower()
-        if alias == "SmartRow" or mac_match:
-            logger.info("SmartRow already known to BlueZ: %s", device.mac_address)
-            _save_smartrow_mac(device.mac_address)
-            del _probe
-            return device.mac_address
+    force_scan = os.path.exists(_FORCE_SCAN_FILE)
+
+    if force_scan:
+        logger.warning(
+            "SmartRow force-scan marker found — skipping BlueZ fast path"
+        )
+    else:
+        for device in _probe.devices():
+            try:
+                alias = device.alias()
+            except Exception:
+                alias = ""
+
+            logger.info(
+                "known device: alias=%s mac=%s",
+                alias,
+                device.mac_address
+            )
+
+            mac_match = (
+                cached_mac
+                and device.mac_address.lower() == cached_mac.lower()
+            )
+
+            if alias == "SmartRow" or mac_match:
+                logger.info(
+                    "SmartRow already known to BlueZ: %s",
+                    device.mac_address
+                )
+                _save_smartrow_mac(device.mac_address)
+                del _probe
+                return device.mac_address
+
     del _probe
-    if cached_mac:
+    if cached_mac and not force_scan:
         logger.info("cached MAC %s not in BlueZ device cache – falling through to full scan", cached_mac)
 
     # --- Full scan: stop any stale discovery, then scan with a fresh manager ---
@@ -290,22 +393,52 @@ def connecttosmartrow():
     logger.info("starting BLE scan on %s – pull the SmartRow handle to wake it up", adapter_name)
     manager.start_discovery()
     manager.run()
+
     while not manager.ready():
         sleep(0.2)
+
     logger.info("found SmartRow macaddress: %s", manager.smartrowmac)
     _save_smartrow_mac(manager.smartrowmac)
 
+    if force_scan:
+        try:
+            os.remove(_FORCE_SCAN_FILE)
+            logger.info("SmartRow force-scan marker cleared")
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            logger.warning(
+                "Could not clear SmartRow force-scan marker: %s",
+                e
+            )
+
     smartrow_mac = manager.smartrowmac
 
-    # Give BlueZ time to expose the discovered device to a fresh
-    # DeviceManager before the connection manager is created.
+    # Explicitly stop BlueZ discovery before trying to establish
+    # the SmartRow LE connection.
+    try:
+        manager.stop_discovery()
+        logger.info(
+            "stopped SmartRow discovery on %s before connection",
+            adapter_name
+        )
+    except Exception as e:
+        logger.warning(
+            "could not stop SmartRow discovery on %s: %s",
+            adapter_name,
+            e
+        )
+
+    # Give BlueZ time to process StopDiscovery and expose the
+    # discovered device to the connection manager.
+    sleep(2)
+
     logger.info(
         "waiting for SmartRow %s to become available in BlueZ",
         smartrow_mac
     )
-    sleep(1)
-    return smartrow_mac
 
+    return smartrow_mac
 if __name__ == '__main__':
 
     manager = gatt.DeviceManager(adapter_name='hci1')
