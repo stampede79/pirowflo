@@ -1,10 +1,12 @@
 
 [unix_http_server]
 file=/tmp/supervisor.sock   ; the path to the socket file
+chmod=0770
+chown=root:#USER#
 
 
-[inet_http_server]         ; inet (TCP) server disabled by default
-port=0.0.0.0:9001        ; ip_address:port specifier, *:port for all iface
+;[inet_http_server]         ; inet (TCP) server disabled by default
+;port=0.0.0.0:9001        ; ip_address:port specifier, *:port for all iface
 ;username=pirowflo; default is no username (open server)
 ;password=pirowflo              ; default is no password (open server)
 
@@ -22,10 +24,8 @@ minprocs=200                 ; min. avail process descriptors;default 200
 [rpcinterface:supervisor]
 supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
 
-
 [supervisorctl]
-;serverurl=unix:///tmp/supervisor.sock ; use a unix:// URL  for a unix socket
-serverurl=http://127.0.0.1:9001
+serverurl=unix:///tmp/supervisor.sock
 
 [program:pirowflo_S4_Monitor_Bluetooth_AntPlus]
 user=#USER#
@@ -45,7 +45,9 @@ autostart=false
 [program:pirowflo_SR_SmartRow_Bluetooth_AntPlus]
 user=#USER#
 command=#PYTHON3# #REPO_DIR#/src/waterrowerthreads.py -i sr -b -a
-autostart=false
+autostart=true
+autorestart=true
+startretries=10
 
 [program:pirowflo_SR_Smartrow_Bluetooth_only]
 user=#USER#
