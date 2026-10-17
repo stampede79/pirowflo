@@ -7,7 +7,10 @@ from time import time, sleep
 
 logger = logging.getLogger(__name__)
 
-SMARTROW_ADAPTER_MAC = "00:1A:7D:DA:71:15"
+SMARTROW_ADAPTER_MAC = os.environ.get(
+    "PIROWFLO_SMARTROW_ADAPTER_MAC",
+    "00:1A:7D:DA:71:15",
+)
 
 def get_adapter_name_by_mac(mac_address):
     bus = dbus.SystemBus()

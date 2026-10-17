@@ -5,6 +5,7 @@
 # https://github.com/PunchThrough/espresso-ble
 # ---------------------------------------------------------------------------
 #
+import os
 import logging
 from queue import Empty
 import signal
@@ -51,7 +52,10 @@ GATT_MANAGER_IFACE = "org.bluez.GattManager1"
 
 logger = logging.getLogger(__name__)
 
-FTMS_ADAPTER_MAC = "B8:27:EB:1D:E3:3E"
+FTMS_ADAPTER_MAC = os.environ.get(
+    "PIROWFLO_FTMS_ADAPTER_MAC",
+    "B8:27:EB:1D:E3:3E",
+)
 
 mainloop = None
 
