@@ -1,330 +1,517 @@
-# PiRowFlo for Waterrower
+# PiRowFlo for WaterRower
 
-31.03.2025: Merged with elp3dr0 to fix to modern pi
-14.11.2021: fixed pip install issue with pyusb in requirements.txt
+PiRowFlo connects a WaterRower or SmartRow to Bluetooth FTMS and ANT+ devices,
+allowing rowing data to be used by compatible apps and sports watches.
 
-<img src="docs/logo/PIROWFLO2.png" width=36% height=36%>
+This repository is a fork of the original
+[PiRowFlo project by inonoob](https://github.com/inonoob/pirowflo).
 
----- 
+> This fork contains substantial changes compared with the original PiRowFlo
+> project. The original project, documentation and authors remain credited
+> below.
 
-<img src="docs/Hardware/IMG_20210104_155432.jpg" width=36% height=36%> <img src="docs/Hardware/Selection_015.png" width=30% height=30%> <img src="docs/Hardware/SmartRow.png" width=30% height=30%>
+<p align="center">
+  <img src="docs/logo/PIROWFLO2.png" width="320" alt="PiRowFlo">
+</p>
 
+## About this fork
 
-<img src="docs/Screen/screenPiRowFlo.gif" width=36% height=36%>
+This fork extends and modernizes PiRowFlo, with a particular focus on reliable
+SmartRow operation.
 
-Read the LICENCE first, by using this software you agree to the licence. 
+Major changes include:
 
+- improved SmartRow Bluetooth connection and recovery
+- automatic recovery when SmartRow goes to sleep or wakes up
+- separate configurable Bluetooth adapters for SmartRow input and FTMS output
+- improved FTMS data handling
+- simultaneous Bluetooth FTMS and ANT+ operation
+- improved ANT+ handling
+- Supervisor and systemd integration
+- integration with the PiRowFlo Control API
+- Flutter-based PiRowFlo Control App
+- automated installation and update tooling
+- support for current Raspberry Pi OS and Python 3.13
+- optional OLED/screen dependencies instead of installing them by default
 
-## News 13.02.2021 
+## Architecture
 
-- Case is still in Prototype stage 
+For a SmartRow setup, PiRowFlo uses one Bluetooth controller to communicate
+with SmartRow and another controller to provide the Bluetooth FTMS service.
 
+```text
+                         SmartRow
+                            |
+                     Bluetooth LE
+                            |
+                            v
+                  Bluetooth Adapter 1
+                            |
+                            v
+                       PiRowFlo
+                      /        \
+                     /          \
+                    v            v
+             Bluetooth FTMS     ANT+
+                    |            |
+                    v            v
+             Bluetooth        ANT+ USB
+              Adapter 2        Dongle
+                    |            |
+                    +------v-----+
+                           |
+                     Apps / Watches
+```
 
-## Supported Apps S4 Monitor (23.02.2021)
-
-|        | Kinomap (BLE) | Cityrowgo (BLE)      | waterrower connect (BLE)   | Coxswain (BLE) 7.9 or higher | Holofit| 
-|:------:|:------:       |:------------:      |:-----:                     |:-------:                     |:-------:     
-|Android | test pending  | :heavy_check_mark: | devs need to update app                  | :heavy_check_mark:           |  :heavy_check_mark:           |
-|iOS     | :heavy_check_mark:  | :heavy_check_mark: | :heavy_check_mark:         |  -                           | :heavy_check_mark:           |
-
-## Supported Apps SmartRow (23.02.2021)
-
-|        | Kinomap (BLE) | Cityrowgo (BLE)      | waterrower connect (BLE)   | Coxswain (BLE) 7.9 or higher |Holofit | 
-|:------:|:------:       |:------------:      |:-----:                     |:-------:                     |:-------:  |
-|Android | test pending  | test pending | devs need to update app                   | :heavy_check_mark:           |  :heavy_check_mark:           |
-|iOS     | :heavy_check_mark: | :heavy_check_mark:   | :heavy_check_mark:         |  -                           | :heavy_check_mark:           |
-
-
-## Supported Watches (14.01.2021)
-
-|   Watch model     |  Navtive rowing App  | ErgIQ|
-|:------:|:------: |:------: |
-| Fenix 6 | :heavy_check_mark:  | currently not|
-
-
-## Project Overview
-
-
+PiRowFlo can operate with Bluetooth FTMS, ANT+, or both simultaneously.
 
 ## Features
 
-- Read Serial Waterrower Data to the Pi
-- Read SmartRow data to the Pi via bluetooth (for pi 3,4 and Zero W internal bluetooth + USB Bluetooth dongle needed - 
-  for pi 1,2,3 without internal bluetooth 2 USB bluetooth dongle from different brands are needed)
-- Send Waterrower Data from the Pi over Bluetooth (Build-in or USB-dongle) 
-- Send Waterrower Data from the Pi over Ant+ via Ant+ dongle 
+- SmartRow as rowing data source via Bluetooth LE
+- WaterRower S4 Monitor support
+- Bluetooth FTMS broadcasting
+- ANT+ broadcasting
+- simultaneous Bluetooth FTMS and ANT+ operation
+- SmartRow sleep/wakeup handling
+- automatic SmartRow reconnection
+- Bluetooth recovery after connection failures
+- configurable Bluetooth adapters
+- Supervisor-based process management
+- local control socket
+- optional Control API
+- optional Flutter Control App
 
+## Hardware
 
+### SmartRow setup
 
-## Motivation
+A SmartRow setup requires:
 
-I wanted to have the ability to use the Android App Coxswain and also my Garmin smartwatch. Therefore, I though
-why not connect the Waterrower via USB to a Raspberry pi and let the Raspberry pi being a BLE and Ant+ transmitter. 
-And wouldn't be even better if it could be control for the Webbrowser. And Last but not least, have at the 
-end of the training a FIT file for Garmin connect or Strava.
+- Raspberry Pi or compatible Linux system
+- SmartRow
+- two Bluetooth controllers
+- ANT+ USB dongle if ANT+ output is required
+- network connection for the optional Control API
 
-With a high demand from people having the Smartrow, I thought why not trying to integrate it as input interface 
-for this project. So it would be either S4 Monitor or Smartrow 
+Two Bluetooth controllers are required when SmartRow input and Bluetooth FTMS
+output are used simultaneously.
 
-## Target of the project 
+A typical Raspberry Pi configuration is:
 
-<img src="docs/Project-overview.png" width=100% height=100%>
+```text
+Bluetooth Adapter 1
+    SmartRow input
 
-## Requirements
+Bluetooth Adapter 2
+    FTMS advertising
 
-### Hardware 
+ANT+ USB Dongle
+    ANT+ broadcasting
+```
 
-Bill of Material(BOM)
+On a Raspberry Pi with integrated Bluetooth, the integrated controller can be
+used as one of the two adapters.
 
-<img src="docs/Hardware/IMG_20210104_155452.jpg" width=50% height=50%>
+For example:
 
-| **Item for Raspberry pi 1,2,3**| 
-|------|
-| Raspberry Pi || 
-| Micro SD card || 
-| Mini USB to USB typ A ||  
-| Bluetooth USB dongle (not 5.0) (LogiLink BT0015) || 
-| Micro USB to Typ A || 
-| 5V USB power supply 2A ||
-| **for Ant+ addition** || 
-| Ant+ dongle (avoid CYCPLUS) ||
-| **for Smartrow** || 
-| Bluetooth USB dongle (not 5.0) (LogiLink BT0015) || 
-| Bluetooth USB dongle (not 5.0) (Mandatory to be different brand)
+```text
+Integrated Bluetooth -> FTMS
+USB Bluetooth dongle -> SmartRow
+ANT+ USB dongle      -> ANT+
+```
 
-| **Item for Raspberry pi 3,4**| 
-|------|
-| Raspberry Pi || 
-| Micro SD card || 
-| Mini USB to USB typ A ||
-| 5V USB power supply 2A ||
-| **for Ant+ addition** || 
-| Ant+ dongle (avoid CYCPLUS) ||
-| **for Smartrow** || 
-| Bluetooth USB dongle (not 5.0) (LogiLink BT0015) || 
-| ~~Bluetooth USB dongle (not 5.0) (Mandatory to be different brand)~~
+The exact adapter assignment is configurable and is not tied to `hci0` or
+`hci1`.
 
+## Installation
 
+For new installations, use the dedicated PiRowFlo Installer:
 
-<img src="docs/Hardware/IMG_20210104_155756.jpg" width=50% height=50%>
+https://github.com/stampede79/pirowflo-installer
 
-| **Item for Raspberry pi Zero W** | 
-|------|
-| Raspberry Pi Zero W || 
-| Micro SD card || 
-| Mini USB to Micro USB || 
-| 5V USB power supply 2A ||
-| **for Ant+ addition**  || 
-| Ant+ dongle (avoid CYCPLUSe) ||
-| Micro USB to USB Hub || 
-| **for Smartrow** || 
-| Bluetooth USB dongle (not 5.0) (LogiLink BT0015) || 
-| ~~Bluetooth USB dongle (not 5.0) (Mandatory to be different brand)~~
+On a fresh Raspberry Pi OS Lite installation:
 
+```bash
+sudo apt update
+sudo apt install -y git
 
-<img src="docs/Hardware/IMG_20210104_155825.jpg" width=50% height=50%>
+git clone https://github.com/stampede79/pirowflo-installer.git
+cd pirowflo-installer
 
+sudo ./install.sh
+```
 
+The installer sets up:
 
-I would recommend buying the Raspberry pi in a kit where most of the parts are included 
+- PiRowFlo
+- Python virtual environment
+- required system dependencies
+- Supervisor
+- systemd services
+- Bluetooth support
+- ANT+ USB permissions
+- PiRowFlo Control API
+- API key
+- optional Bluetooth adapter configuration
 
-### Software 
+The default installation paths are:
 
-### Installation
-On a fresh installed Raspbian, git must be installed first 
+```text
+/opt/pirowflo
+/opt/pirowflo-control-api
+```
 
-    sudo apt-get install git
+## Bluetooth configuration
 
-Clone the repo from Github: 
+Bluetooth adapter configuration is stored in:
 
-    git clone https://github.com/inonoob/pirowflo.git 
-    
-go into the folder: 
+```text
+/etc/pirowflo.env
+```
 
-    cd pirowflo 
+Example:
 
-make install.sh executable: 
+```text
+PIROWFLO_SMARTROW_ADAPTER_MAC=00:1A:7D:DA:71:15
+PIROWFLO_FTMS_ADAPTER_MAC=B8:27:EB:1D:E3:3E
+```
 
-    sudo chmod +x install.sh
+Do not copy these example MAC addresses to another system. Each Bluetooth
+controller has its own address.
 
-execute install.sh in order to setup everything: (This can take 5 - 10 min to set all up). If during the first installation
-you hadn't have your Ant+ dongle. Just re-run the script and it will install the missing Ant+ and udev profiles.
+The installer provides an interactive configuration utility:
 
-    sudo ./install.sh 
+```bash
+cd ~/pirowflo-installer
+sudo ./configure-bluetooth.sh
+```
 
-Once installation and reboot complete, go into the pirowflo folder: 
+The utility lists the available Bluetooth controllers and asks which controller
+should be used for:
 
-    cd ~/pirowflo
+- SmartRow
+- FTMS
 
+The Bluetooth adapters do not have to be connected during the initial
+installation. Configuration can be performed later.
 
-### Getting Started
+## Operating modes
 
-Start PiRowFlo from the webserver which is available under the: 
+PiRowFlo provides several Supervisor profiles.
 
-http://"raspberry-pi-IP":9001 
+### SmartRow - Bluetooth + ANT+
 
-<img src="docs/webserver/Selection_023.png" width=60% height=60%>
+This is the normal combined SmartRow mode:
 
-or 
+```text
+pirowflo_SR_SmartRow_Bluetooth_AntPlus
+```
 
-Use the Screen to start PiRowFlo
+It reads rowing data from SmartRow and broadcasts it using both Bluetooth FTMS
+and ANT+.
 
-<img src="docs/Screen/IMG_20210221_235228.jpg" width=60% height=60%>
+### SmartRow - Bluetooth only
 
-or 
+```text
+pirowflo_SR_Smartrow_Bluetooth_only
+```
 
-start PiRowFlo from console 
+Reads SmartRow data and broadcasts Bluetooth FTMS only.
 
-NB: For compatibility with recent Raspberry Pi OS releases, the program must be run within the virtual environment by including
-the path to the virtual environment when you start the program. The simple way to do this is to change into your project directory
-and then use the commands as they appear below.
+### SmartRow - ANT+ only
 
-If the script waterrowerthreads is started with -h or --help it shows the available option for the program 
+```text
+pirowflo_SR_Smartrow_AntPlus_only
+```
 
+Reads SmartRow data and broadcasts ANT+ only.
 
-    venv/bin/python3 src/waterrowerthreads.py -h
-    
-    usage:  venv/bin/python3 src/waterrowerthreads.py [-h] [-i {s4,sr}] [-b] [-a]
+S4 Monitor profiles are also available.
 
-    Python script to broadcast waterrower data over BLE and ANT
+## Service management
 
-      PiRowFlo for Waterrower
-                                                                 +-+
-                                               XX+-----------------+
-                  +-------+                 XXXX    |----|       | |
-                   +-----+                XXX +----------------+ | |
-                   |     |             XXX    |XXXXXXXXXXXXXXXX| | |
-    +--------------X-----X----------+XXX+------------------------+-+
-    |                                                              |
-    +--------------------------------------------------------------+
+PiRowFlo is managed by Supervisor running as a systemd service.
 
-    To begin choose an interface from where the data will be taken from either the 
-    S4 Monitor connected via USB or the smartrow pulley via bluetooth low energy
-    
-    Then select which broadcast methode will be used. Bluetooth low energy or Ant+ or both.
-    
-    e.g. use the S4 connected via USB and broadcast data over bluetooth and Ant+
-    
-    venv/bin/python3 src/waterrowerthreads.py -i s4 -b -a
-    
-    optional arguments:
-      -h, --help            show this help message and exit
-      -i {s4,sr}, --interface {s4,sr}
-                            choose  Waterrower interface S4 monitor: s4 or Smartrow: sr
-      -b, --blue            Broadcast Waterrower data over bluetooth low energy
-      -a, --antfe           Broadcast Waterrower data over Ant+
+Check Supervisor:
 
+```bash
+systemctl status supervisord.service
+```
 
+Check the individual PiRowFlo processes:
 
+```bash
+/opt/pirowflo/venv/bin/supervisorctl \
+  -c /opt/pirowflo/services/supervisord.conf \
+  status
+```
 
-For example if the Waterrower should send data over Bluetooth and ANT 
+A typical SmartRow combined setup should show:
 
-    venv/bin/python3 src/waterrowerthreads.py -i s4 -b -a 
+```text
+pirowflo_SR_SmartRow_Bluetooth_AntPlus   RUNNING
+```
 
-## Manual update 
+## Logs
 
-The PiRowFlo autoupdate function is not yet implemented. Therefore, we recommend to perform the update as follows: 
+The PiRowFlo log is located at:
 
-    git pull https://github.com/inonoob/pirowflo.git 
+```text
+/opt/pirowflo/src/pirowflo.log
+```
 
-And then start the installation script again
+Follow the log:
 
-    sudo ./install.sh 
+```bash
+tail -f /opt/pirowflo/src/pirowflo.log
+```
 
-## FAQ 
+Show the latest entries:
 
----
+```bash
+tail -n 100 /opt/pirowflo/src/pirowflo.log
+```
 
-I got the error: 
+Supervisor logs can also be inspected with:
 
-    serial open error waiting
+```bash
+journalctl -u supervisord.service
+```
 
-if that is the case, check if your $USER belongs to the group "dialout"
+## Updating
 
-    pi@raspberrypi:/dev $ groups
-    pi adm dialout cdrom sudo audio video plugdev games users input netdev gpio i2c spi
+When PiRowFlo was installed using the PiRowFlo Installer, both PiRowFlo and the
+Control API can be updated with:
 
-if you don't see the "dialout", then your $USER needs to be add to this group 
+```bash
+cd ~/pirowflo-installer
+sudo ./update.sh
+```
 
-    sudo usermod -a -G dialout $USER 
+The updater:
 
-Then you need to log out or reboot that it takes effect. 
+1. checks both Git repositories for local modifications
+2. stops PiRowFlo and the Control API
+3. updates the repositories using fast-forward-only Git pulls
+4. updates Python dependencies
+5. regenerates local PiRowFlo configuration
+6. restarts the services
 
----
+Local modifications cause the update to abort rather than overwrite them.
 
-I can't connect with the app Coxswain: 
+## Control API
 
-It is only working with Coxswain version higher 7.9. as the low version haven't the improved connectivity code for 
-bluetooth. 
+PiRowFlo can optionally be controlled through the separate PiRowFlo Control API:
 
---- 
+https://github.com/stampede79/pirowflo-control-api
 
-If you see this kind of error in the console you
+The API provides functionality for:
 
-    2021-01-16 19:59:14,341 - fakesmartrowble - CRITICAL - Failed to register advertisement: org.bluez.Error.Failed: Failed to register advertisement
-    Exception in thread Thread-2:
-    Traceback (most recent call last):
-      File "/usr/lib/python3.7/threading.py", line 917, in _bootstrap_inner
-        self.run()
-      File "/usr/lib/python3.7/threading.py", line 865, in run
-        self._target(*self._args, **self._kwargs)
-      File "fakesmartrowthreads.py", line 51, in FakeSmartRowBLE
-        FakeSmartRowBLE()
-    TypeError: 'NoneType' object is not callable
+- reading PiRowFlo status
+- reading SmartRow connection status
+- starting PiRowFlo profiles
+- stopping PiRowFlo
+- restarting PiRowFlo
+- resetting the current SmartRow/PiRowFlo session
 
-That means what a client is still connect with the Raspberry pi and must be disconnect first before restarting the 
-service. So check on your smartphone or tablet is a connection is still active. The simplest thing to fix is to close
-the app and then try again. 
+The default API port is:
 
----
+```text
+8090
+```
 
-if you see this kind of error in the console: 
+API configuration is stored in:
 
-    pi@raspberrypi:~/pirowflo/src $ python3 waterrowerthreads.py -i s4 -b -a 
-    2021-02-15 06:57:00,481 - __main__ - INFO - inferface S4 monitor will be used for data input
-    2021-02-15 06:57:00,489 - __main__ - INFO - Waterrower Interface started
-    2021-02-15 06:57:00,491 - __main__ - INFO - no interface selected
-    2021-02-15 06:57:00,504 - __main__ - INFO - Start BLE Advertise and BLE GATT Server
-    2021-02-15 06:57:00,528 - __main__ - INFO - Start Ant and start broadcast data
-    start search for dongle
-    2021-02-15 06:57:00,585 - dbus.proxies - ERROR - Introspect error on :1.5:/: dbus.exceptions.DBusException: org.freedesktop.DBus.Error.AccessDenied: Rejected send message, 2 matched rules; type="method_call", sender=":1.15" (uid=1000 pid=627 comm="python3 waterrowerthreads.py -i s4 -b -a ") interface="org.freedesktop.DBus.Introspectable" member="Introspect" error name="(unset)" requested_reply="0" destination=":1.5" (uid=0 pid=369 comm="/usr/lib/bluetooth/bluetoothd ")
-    2021-02-15 06:57:00,985 - waterrowerinterface - WARNING - port not found retrying in 5s
-    Exception in thread Thread-4:
+```text
+/etc/pirowflo-control.env
+```
 
+The API is protected by an API key.
 
-that means that the current user is not in the group "bluetooth". The used to be a bug in the install.sh. But you can
-also add it manually with the following command (substitute your username for $USER): 
+## PiRowFlo Control App
 
-    sudo usermod -a -G bluetooth $USER 
+A Flutter-based Android control application is available separately:
 
-If you don't know your username, type:
+https://github.com/stampede79/pirowflo-control-app
 
-    whoami
+The app communicates with the PiRowFlo Control API and provides a mobile
+interface for:
 
-The usermod command run as sudo will add the user to the group "bluetooth". Then reboot in order to take effect.  This should fix the issue. 
+- PiRowFlo status
+- SmartRow status
+- Bluetooth + ANT+ mode
+- Bluetooth-only mode
+- ANT+-only mode
+- restart
+- stop
+- reset
 
-In order to check if it had worked, use the following command: 
+The server URL configured in the app should include the protocol and API port.
 
-    pi@raspberrypi:~/pirowflo $ groups
-    pi adm dialout cdrom sudo audio video plugdev games users input netdev bluetooth gpio i2c spi
+Example:
 
+```text
+http://192.168.1.100:8090
+```
 
---- 
+## Optional OLED / Screen support
 
-If you can connect to the PI with your third party app and don't get any data also don't get any data to your watch via ant+ then there is 
-a high chance that the connection between S4 Monitor and the Rasbperry pi is not working correctly. 
+The original PiRowFlo project contains support for an OLED display and
+Raspberry Pi GPIO controls.
 
-- Check if you have heard the reset "BEEP" from the S4 Monitor. If not that means that the connection is not correct
-  try to unplug and replug it in. 
-- Check the usb cable first. Try a different one. Cheap one tend to break as you need to plug and unplug it. 
+These components are optional in this fork and are not installed as part of the
+normal PiRowFlo core dependencies.
 
-## Parts of the code based on following Repos:
+Core dependencies are installed from:
 
-- [Link to repo](https://github.com/bfritscher/waterrower) base code used to get the Waterrower Data over USB Interface 
-- [Link to repo](https://github.com/PunchThrough/espresso-ble) base code for the BLE GATT server and Advertiser example which
-is self based on the Bluez Gatt server example
-- [Link to repo](https://github.com/WouterJD/FortiusANT) base code for the Ant+ part used for this project
-- [Link to repo](https://github.com/techdiem/RasPi-OLED-Menu) base code for the Screen part used for this project
+```text
+requirements.txt
+```
 
-Those Repos with some of their code are used as  base code 
-which then have been rewritten to meet the requirements of this project. 
+For the optional screen components:
+
+```bash
+/opt/pirowflo/venv/bin/pip install \
+  -r /opt/pirowflo/requirements-screen.txt
+```
+
+The optional screen requirements include:
+
+- `luma.oled`
+- `pigpio`
+- `spidev`
+
+Existing screen-related source code and hardware documentation are retained in
+the repository.
+
+## Troubleshooting
+
+### SmartRow is not found
+
+Check the configured Bluetooth adapters:
+
+```bash
+cat /etc/pirowflo.env
+```
+
+List available Bluetooth controllers:
+
+```bash
+bluetoothctl list
+```
+
+Check whether Bluetooth is blocked:
+
+```bash
+rfkill list bluetooth
+```
+
+If necessary:
+
+```bash
+sudo rfkill unblock bluetooth
+```
+
+Then check the PiRowFlo log:
+
+```bash
+tail -n 100 /opt/pirowflo/src/pirowflo.log
+```
+
+### ANT+ dongle is not ready
+
+Check whether the ANT+ USB dongle is detected:
+
+```bash
+lsusb
+```
+
+A Dynastream ANTUSB2 stick typically appears with USB ID:
+
+```text
+0fcf:1008
+```
+
+The installer creates a udev rule that grants the `plugdev` group access to the
+ANT+ USB device.
+
+Check the device permissions if ANT+ cannot start.
+
+### Bluetooth FTMS does not start
+
+Check the Bluetooth controllers:
+
+```bash
+bluetoothctl list
+```
+
+Then inspect the PiRowFlo log:
+
+```bash
+grep -iE 'BLE|FTMS|BlueZ' /opt/pirowflo/src/pirowflo.log | tail -100
+```
+
+### PiRowFlo repeatedly restarts
+
+Check Supervisor:
+
+```bash
+/opt/pirowflo/venv/bin/supervisorctl \
+  -c /opt/pirowflo/services/supervisord.conf \
+  status
+```
+
+Check stderr:
+
+```bash
+/opt/pirowflo/venv/bin/supervisorctl \
+  -c /opt/pirowflo/services/supervisord.conf \
+  tail pirowflo_SR_SmartRow_Bluetooth_AntPlus stderr
+```
+
+And inspect the main log:
+
+```bash
+tail -n 100 /opt/pirowflo/src/pirowflo.log
+```
+
+## Historical upstream documentation
+
+This repository is based on the original PiRowFlo project.
+
+The upstream project originally focused on connecting WaterRower hardware to a
+Raspberry Pi and broadcasting rowing data over Bluetooth and ANT+ so that the
+same rowing data could be consumed by training apps and Garmin devices.
+
+The original project also introduced SmartRow support and optional OLED/GPIO
+hardware.
+
+Some documentation and images from the original project are retained under:
+
+```text
+docs/
+```
+
+Older application compatibility information and hardware documentation may
+refer to the state of the upstream project around 2021 and should not
+necessarily be considered current compatibility information for this fork.
+
+## Credits
+
+This project is based on the original
+[PiRowFlo project by inonoob](https://github.com/inonoob/pirowflo).
+
+Large parts of the original architecture, protocol implementation,
+documentation and hardware support originate from the upstream project.
+
+This fork builds on that work and adds the SmartRow reliability, recovery,
+configuration, installation and control functionality described above.
+
+Additional upstream projects used by the original PiRowFlo implementation are
+documented in the repository history and source files.
+
+## License
+
+PiRowFlo is licensed under the GNU General Public License v3.0.
+
+See [LICENSE](LICENSE) for the complete license text.
