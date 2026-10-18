@@ -16,6 +16,15 @@ This repository is a fork of the original
 
 ## About this fork
 
+> **Current focus: SmartRow**
+>
+> This fork is currently designed and tested for SmartRow-based setups.
+> The installer, Control API and Flutter Control App use the SmartRow profiles.
+>
+> The original WaterRower S4 Monitor implementation and Supervisor profiles
+> inherited from upstream are still present in the repository, but they are
+> currently untested and are not exposed through the Control App.
+
 This fork extends and modernizes PiRowFlo, with a particular focus on reliable
 SmartRow operation.
 
@@ -68,7 +77,6 @@ PiRowFlo can operate with Bluetooth FTMS, ANT+, or both simultaneously.
 ## Features
 
 - SmartRow as rowing data source via Bluetooth LE
-- WaterRower S4 Monitor support
 - Bluetooth FTMS broadcasting
 - ANT+ broadcasting
 - simultaneous Bluetooth FTMS and ANT+ operation
@@ -225,8 +233,6 @@ pirowflo_SR_Smartrow_AntPlus_only
 ```
 
 Reads SmartRow data and broadcasts ANT+ only.
-
-S4 Monitor profiles are also available.
 
 ## Service management
 
@@ -474,6 +480,25 @@ And inspect the main log:
 ```bash
 tail -n 100 /opt/pirowflo/src/pirowflo.log
 ```
+
+## WaterRower S4 Monitor
+
+The original PiRowFlo project supports the WaterRower S4 Monitor as a rowing
+data source.
+
+The S4 implementation and Supervisor profiles inherited from upstream are still
+present in this repository:
+
+- `pirowflo_S4_Monitor_Bluetooth_AntPlus`
+- `pirowflo_S4_Monitor_Bluetooth_only`
+- `pirowflo_S4_Monitor_AntPlus_only`
+
+However, S4 operation has not been tested with the current version of this
+fork.
+
+The current PiRowFlo Installer, Control API and Flutter Control App are designed
+for SmartRow operation and do not currently provide S4 configuration or profile
+selection.
 
 ## Historical upstream documentation
 
