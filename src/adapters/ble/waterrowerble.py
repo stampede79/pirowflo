@@ -369,7 +369,7 @@ class RowerData(Characteristic):
         if not self.notifying:
             return
 
-        GLib.timeout_add(1000, self.Waterrower_cb)
+        GLib.timeout_add(250, self.Waterrower_cb)
 
     def StartNotify(self):
         logger.info(
