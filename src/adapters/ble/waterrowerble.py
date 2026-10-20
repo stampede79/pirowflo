@@ -427,15 +427,25 @@ class FitnessMachineControlPoint(Characteristic):
 
     def WriteValue(self, value, options):
         self.value = value
-        print(value)
+
+        logger.info(
+            "FTMS Control Point WRITE (2AD9): %s",
+            [int(x) for x in value]
+        )
+
         byte = self.value[0]
-        print('Fitness machine control point: ' + repr(self.value))
+
         if byte == 0:
-            print('Request control')
+            logger.info("FTMS Control Point: Request Control (0x00)")
             self.fmcp_cb(byte)
         elif byte == 1:
-            print('Reset')
+            logger.info("FTMS Control Point: Reset (0x01)")
             self.fmcp_cb(byte)
+        else:
+            logger.warning(
+                "FTMS Control Point: unsupported opcode 0x%02x",
+                int(byte)
+            )
 
 class FitnessMachineStatus(Characteristic):
     FITNESS_MACHINE_STATUS_UUID = '2ada'
@@ -452,18 +462,26 @@ class FitnessMachineStatus(Characteristic):
         self.notifying = False
 
     def StartNotify(self):
+        logger.info(
+            "FTMS Machine Status client subscribed (2ADA), current notifying=%s",
+            self.notifying
+        )
+
         if self.notifying:
             return
 
         self.notifying = True
-        print("Fitness Machine Status notifications enabled")
 
     def StopNotify(self):
+        logger.info(
+            "FTMS Machine Status client unsubscribed (2ADA), current notifying=%s",
+            self.notifying
+        )
+
         if not self.notifying:
             return
 
         self.notifying = False
-        print("Fitness Machine Status notifications disabled")
 
 class HeartRate(Service):
     HEART_RATE = '180D'
