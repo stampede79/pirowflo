@@ -36,6 +36,7 @@ from adapters.ant import waterrowerant
 from adapters.smartrow import smartrowtobleant
 import pathlib
 import signal
+import json
 
 loggerconfigpath = str(pathlib.Path(__file__).parent.absolute()) +'/' +'logging.conf'
 
@@ -45,7 +46,7 @@ Mainlock = threading.Lock()
 CONTROL_SOCKET = "/tmp/pirowflo-control.sock"
 
 
-def control_socket_server(reset_q):
+def control_socket_server(reset_q, metrics_q):
     try:
         if os.path.exists(CONTROL_SOCKET):
             os.unlink(CONTROL_SOCKET)
@@ -72,6 +73,16 @@ def control_socket_server(reset_q):
                     logger.info(
                         "Reset requested via control socket"
                     )
+
+                elif command == "metrics":
+                    if metrics_q:
+                        metrics = dict(metrics_q[-1])
+                    else:
+                        metrics = {}
+
+                    response = json.dumps(metrics) + "\n"
+                    conn.sendall(response.encode())
+
                 else:
                     conn.sendall(b"ERROR unknown command\n")
 
@@ -111,9 +122,14 @@ def main(args=None):
         Waterrowerserial = wrtobleant.main(in_q, ble_out_q, ant_out_q)
         Waterrowerserial()
 
-    def Smartrow(in_q, ble_out_q, ant_out_q):
+    def Smartrow(in_q, ble_out_q, ant_out_q, metrics_out_q):
         logger.info("Smartrow Interface started")
-        smartrowtobleant.main(in_q, ble_out_q, ant_out_q)
+        smartrowtobleant.main(
+            in_q,
+            ble_out_q,
+            ant_out_q,
+            metrics_out_q,
+        )
 
     def ANTService(in_q, ant_in_q):
         logger.info("Start Ant and start broadcast data")
@@ -123,9 +139,11 @@ def main(args=None):
     # TODO: Switch from queue to deque
     q = Queue()
 
+    metrics_q = deque(maxlen=1)
+
     control_thread = threading.Thread(
         target=control_socket_server,
-        args=(q,),
+        args=(q, metrics_q),
         daemon=True,
     )
     control_thread.start()
@@ -148,7 +166,7 @@ def main(args=None):
         t = threading.Thread(
             name="SmartRow",
             target=Smartrow,
-            args=(q, ble_q, ant_q)
+            args=(q, ble_q, ant_q, metrics_q)
         )
         t.daemon = True
         t.start()

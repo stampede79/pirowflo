@@ -225,7 +225,7 @@ def heartbeat(sr, stop_event):
 
         stop_event.wait(1)
 
-def main(in_q, ble_out_q, ant_out_q):
+def main(in_q, ble_out_q, ant_out_q, metrics_out_q=None):
     adapter_name = smartrowreader.get_adapter_name_by_mac(
         smartrowreader.SMARTROW_ADAPTER_MAC
     )
@@ -450,6 +450,8 @@ def main(in_q, ble_out_q, ant_out_q):
 
             ble_out_q.append(SRtoBLEANT.WRValues)
             ant_out_q.append(SRtoBLEANT.WRValues)
+            if metrics_out_q is not None:
+                metrics_out_q.append(deepcopy(SRtoBLEANT.WRValues))
 
             sleep(0.1)
 
